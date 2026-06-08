@@ -1,0 +1,3 @@
+This is an ordinary text file.
+It contains release notes for version 1.0.0 of an internal tool.
+Nothing here should trigger any detection rule.
