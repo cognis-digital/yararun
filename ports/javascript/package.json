@@ -1,0 +1,10 @@
+{
+  "name": "@cognis/yararun",
+  "version": "0.2.0",
+  "description": "JavaScript port of yararun (Cognis Neural Suite)",
+  "bin": {
+    "yararun": "index.js"
+  },
+  "license": "LicenseRef-COCL-1.0",
+  "type": "module"
+}
