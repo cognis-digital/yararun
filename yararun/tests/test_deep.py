@@ -12,7 +12,6 @@ if ROOT not in sys.path:
 from yararun import (  # noqa: E402
     TOOL_NAME,
     TOOL_VERSION,
-    DEFAULT_RULES,
     file_hashes,
     load_rules,
     parse_rules,

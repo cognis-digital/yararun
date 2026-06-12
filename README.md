@@ -16,7 +16,7 @@
 </div>
 
 ```bash
-pip install cognis-yararun
+pip install "git+https://github.com/cognis-digital/yararun.git"
 yararun scan .            # → prioritized findings in seconds
 ```
 
@@ -48,7 +48,7 @@ lightweight hunting
 ## Quick start
 
 ```bash
-pip install cognis-yararun
+pip install "git+https://github.com/cognis-digital/yararun.git"
 yararun --version
 yararun scan .                       # scan current project
 yararun scan . --format json         # machine-readable
