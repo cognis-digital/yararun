@@ -20,6 +20,33 @@ pip install cognis-yararun
 yararun scan .            # → prioritized findings in seconds
 ```
 
+## Usage — step by step
+
+1. **Install** the CLI (console script `yararun`):
+   ```bash
+   pip install cognis-yararun
+   ```
+2. **List the bundled triage rule pack** (or your own with `-r`):
+   ```bash
+   yararun rules
+   yararun rules -r myrules.yar
+   ```
+3. **Scan one or more files** against the rules (`-` reads stdin); add a custom rule file with `-r`:
+   ```bash
+   yararun scan suspicious.bin
+   yararun scan ./samples/* -r myrules.yar
+   ```
+4. **Read the result** as JSON, and validate a rule file before shipping it:
+   ```bash
+   yararun scan suspicious.bin --format json
+   yararun compile myrules.yar
+   ```
+5. **Automate in CI** — `scan` exits non-zero when actionable (non-info) matches are found:
+   ```yaml
+   - run: pip install cognis-yararun
+   - run: yararun scan artifact.bin --format json
+   ```
+
 ## Contents
 
 - [Why yararun?](#why) · [Features](#features) · [Quick start](#quick-start) · [Example](#example) · [Architecture](#architecture) · [AI stack](#ai-stack) · [How it compares](#how-it-compares) · [Integrations](#integrations) · [Install anywhere](#install-anywhere) · [Related](#related) · [Contributing](#contributing)
