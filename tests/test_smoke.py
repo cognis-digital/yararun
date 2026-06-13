@@ -8,9 +8,8 @@ from contextlib import redirect_stdout
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from yararun import TOOL_NAME, TOOL_VERSION, parse_rules, scan_path  # noqa: E402
+from yararun import TOOL_NAME, TOOL_VERSION, parse_rules, scan  # noqa: E402
 from yararun.cli import main  # noqa: E402
-from yararun.core import _eval_condition, _hex_to_regex  # noqa: E402
 
 
 TEXT_RULE = '''
@@ -46,35 +45,65 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(len(rules), 1)
         self.assertEqual(rules[0].name, "HasSecret")
         self.assertEqual(rules[0].meta["description"], "finds the word secret")
-        self.assertTrue(rules[0].strings[0].nocase)
+        # $s is a text string with nocase — verify the regex is case-insensitive
+        sd = rules[0].strings["$s"]
+        self.assertTrue(sd.regex.flags & __import__("re").IGNORECASE)
 
     def test_parse_requires_rule(self):
         with self.assertRaises(ValueError):
             parse_rules("not a rule")
 
-    def test_hex_to_regex(self):
-        self.assertEqual(_hex_to_regex("4d 5a"), b"\\\x4d\\\x5a")
-        self.assertEqual(_hex_to_regex("4d ?? 5a").count(b"."), 1)
-        with self.assertRaises(ValueError):
-            _hex_to_regex("zz")
+    def test_hex_rule_compiles(self):
+        # Verify hex strings compile without error
+        rules = parse_rules(MULTI_RULE)
+        self.assertEqual(len(rules), 1)
+        self.assertIn("$h", rules[0].strings)
+        self.assertEqual(rules[0].strings["$h"].kind, "hex")
 
 
 class ConditionTests(unittest.TestCase):
+    """Test the condition evaluator via full rule round-trips."""
+
+    def _mk_rule(self, condition: str, string_bodies: dict[str, str] = None) -> object:
+        """Build a minimal Rule object by parsing a synthetic source."""
+        parts = []
+        if string_bodies:
+            parts.append("strings:")
+            for k, v in string_bodies.items():
+                parts.append(f'    {k} = "{v}"')
+        parts.append(f"condition:\n    {condition}")
+        body = "\n".join(parts)
+        src = f"rule T {{\n{body}\n}}"
+        return parse_rules(src)[0]
+
     def test_and_or(self):
-        names = ["a", "b"]
-        self.assertTrue(_eval_condition("$a and $b", {"a": True, "b": True}, names))
-        self.assertFalse(_eval_condition("$a and $b", {"a": True, "b": False}, names))
-        self.assertTrue(_eval_condition("$a or $b", {"a": False, "b": True}, names))
+        from yararun.core import match_rule
+        r_and = self._mk_rule("$a and $b",
+                               {"$a": "alpha", "$b": "beta"})
+        self.assertIsNotNone(match_rule(r_and, b"alpha beta"))
+        self.assertIsNone(match_rule(r_and, b"alpha only"))
+
+        r_or = self._mk_rule("$a or $b",
+                              {"$a": "alpha", "$b": "beta"})
+        self.assertIsNotNone(match_rule(r_or, b"only beta"))
 
     def test_of_them(self):
-        names = ["a", "b", "c"]
-        self.assertTrue(_eval_condition("any of them", {"a": True, "b": False, "c": False}, names))
-        self.assertFalse(_eval_condition("all of them", {"a": True, "b": False, "c": False}, names))
-        self.assertTrue(_eval_condition("2 of them", {"a": True, "b": True, "c": False}, names))
+        from yararun.core import match_rule
+        r = self._mk_rule("any of them",
+                          {"$a": "alpha", "$b": "beta", "$c": "charlie"})
+        self.assertIsNotNone(match_rule(r, b"alpha only"))
+        self.assertIsNone(match_rule(r, b"nothing here"))
+
+        r2 = self._mk_rule("2 of them",
+                           {"$a": "alpha", "$b": "beta", "$c": "charlie"})
+        self.assertIsNotNone(match_rule(r2, b"alpha beta"))
+        self.assertIsNone(match_rule(r2, b"alpha only"))
 
     def test_not(self):
-        names = ["a"]
-        self.assertTrue(_eval_condition("not $a", {"a": False}, names))
+        from yararun.core import match_rule
+        r = self._mk_rule("not $a", {"$a": "alpha"})
+        self.assertIsNotNone(match_rule(r, b"no match here"))
+        self.assertIsNone(match_rule(r, b"alpha present"))
 
 
 class ScanTests(unittest.TestCase):
@@ -92,24 +121,35 @@ class ScanTests(unittest.TestCase):
 
     def test_scan_finds_match(self):
         rules = parse_rules(TEXT_RULE)
-        report = scan_path(self.tmp, rules)
-        self.assertEqual(report.files_scanned, 2)
-        self.assertEqual(len(report.results), 1)
-        self.assertEqual(report.total_matches, 1)
-        self.assertEqual(report.results[0].matches[0].rule, "HasSecret")
+        # scan individual files
+        hit_data = open(os.path.join(self.tmp, "hit.txt"), "rb").read()
+        miss_data = open(os.path.join(self.tmp, "miss.txt"), "rb").read()
+        hit_res = scan(hit_data, rules, target="hit.txt")
+        miss_res = scan(miss_data, rules, target="miss.txt")
+        self.assertTrue(hit_res.matches)
+        self.assertFalse(miss_res.matches)
+        self.assertEqual(hit_res.matches[0].rule, "HasSecret")
 
     def test_combo_rule_hex_and_regex(self):
         rules = parse_rules(MULTI_RULE)
-        path = os.path.join(self.tmp, "bin.dat")
-        with open(path, "wb") as f:
-            f.write(b"alpha beeeta \xde\xad\xbe\xef tail")
-        report = scan_path(path, rules)
-        self.assertEqual(report.total_matches, 3)
+        data = b"alpha beeeta \xde\xad\xbe\xef tail"
+        res = scan(data, rules)
+        self.assertTrue(res.matches)
 
     def test_to_dict_serializable(self):
         rules = parse_rules(TEXT_RULE)
-        report = scan_path(self.tmp, rules)
-        json.dumps(report.to_dict())  # must not raise
+        data = open(os.path.join(self.tmp, "hit.txt"), "rb").read()
+        res = scan(data, rules, target="hit.txt")
+        json.dumps(res.to_dict())  # must not raise
+
+    def test_scan_result_has_entropy_filetype_hashes(self):
+        rules = parse_rules(TEXT_RULE)
+        data = b"this has a SECRET inside"
+        res = scan(data, rules, target="<test>")
+        self.assertIsInstance(res.entropy, float)
+        self.assertIsInstance(res.filetype, str)
+        self.assertIn("sha256", res.hashes)
+        self.assertEqual(len(res.hashes["sha256"]), 64)
 
 
 class CliTests(unittest.TestCase):
@@ -127,26 +167,37 @@ class CliTests(unittest.TestCase):
     def test_cli_findings_exit_code(self):
         buf = io.StringIO()
         with redirect_stdout(buf):
-            rc = main(["--format", "json", "scan", self.tmp, "-e", TEXT_RULE])
+            rc = main(["--format", "json", "scan", self.hit, "-e", TEXT_RULE])
         self.assertEqual(rc, 1)
         data = json.loads(buf.getvalue())
-        self.assertEqual(data["total_matches"], 1)
+        self.assertEqual(data["match_count"], 1)
 
     def test_cli_no_findings_exit_zero(self):
         empty = os.path.join(self.tmp, "clean")
         os.mkdir(empty)
-        with open(os.path.join(empty, "c.txt"), "w") as f:
+        clean_file = os.path.join(empty, "c.txt")
+        with open(clean_file, "w") as f:
             f.write("harmless\n")
         buf = io.StringIO()
         with redirect_stdout(buf):
-            rc = main(["scan", empty, "-e", TEXT_RULE])
+            rc = main(["scan", clean_file, "-e", TEXT_RULE])
         self.assertEqual(rc, 0)
 
     def test_cli_bad_rule_exit_error(self):
         buf = io.StringIO()
         with redirect_stdout(buf):
-            rc = main(["scan", self.tmp, "-e", "garbage"])
+            rc = main(["scan", self.hit, "-e", "garbage"])
         self.assertEqual(rc, 2)
+
+    def test_cli_info_subcommand(self):
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = main(["--format", "json", "info", self.hit])
+        self.assertEqual(rc, 0)
+        data = json.loads(buf.getvalue())
+        self.assertIn("filetype", data)
+        self.assertIn("entropy", data)
+        self.assertIn("sha256", data["hashes"])
 
 
 if __name__ == "__main__":

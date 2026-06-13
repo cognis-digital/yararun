@@ -9,30 +9,89 @@ triage on artifacts you already possess:
   * text strings           $a = "evil.exe"          (modifiers: nocase, wide, ascii, fullword)
   * hex strings            $h = { 4D 5A ?? 50 [2-4] 90 }   (wildcards + jumps)
   * regex strings          $r = /https?:\\/\\/[a-z]+/ nocase
+  * xor strings            $s = "secret" xor  / xor(0x01-0xff)
   * string counts          #a, #a > 3
   * offsets / anchoring     $a at 0, $a in (0..1024)
   * boolean conditions     and / or / not / parentheses
   * set conditions         any of them, all of ($a, $b), 2 of ($s*)
-  * special vars           filesize, all, any
+  * special vars           filesize, entropy, filetype
+  * integer functions      uint8(N), uint16(N), uint32(N)
+  * match-length refs      !a (length of first match)
+  * indexed offset refs    @a[N] (N-th match offset, 1-based)
   * tags                   rule X : trojan apt { ... }
 
 It ships with a real, non-trivial bundled rule pack (DEFAULT_RULES) covering
 common triage signatures: PE/ELF/Mach-O headers, packers (UPX), embedded
 scripts (PowerShell/JS/VBScript), eval/exec droppers, base64 PE stubs,
-suspicious URLs/onion addresses, ransom notes, and crypto-mining pool configs.
+suspicious URLs/onion addresses, ransom notes, crypto-mining pool configs,
+high-entropy blobs, and XOR-encoded payloads.
 
 Defensive use only: scan files/blobs you are authorized to inspect.
 """
 from __future__ import annotations
 
+import hashlib
+import math
 import re
+import struct
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 TOOL_NAME = "yararun"
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.1.0"
 
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
+
+
+# --------------------------------------------------------------------------- #
+# File-intelligence helpers                                                   #
+# --------------------------------------------------------------------------- #
+def shannon_entropy(data: bytes) -> float:
+    """Compute Shannon entropy in bits/byte (0.0 .. 8.0)."""
+    if not data:
+        return 0.0
+    freq = [0] * 256
+    for b in data:
+        freq[b] += 1
+    n = len(data)
+    ent = 0.0
+    for c in freq:
+        if c:
+            p = c / n
+            ent -= p * math.log2(p)
+    return ent
+
+
+def sniff_filetype(data: bytes) -> str:
+    """Return a simple filetype label based on magic bytes."""
+    if data[:2] == b"MZ":
+        return "pe"
+    if data[:4] == b"\x7fELF":
+        return "elf"
+    if data[:4] in (b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
+                    b"\xca\xfe\xba\xbe", b"\xcf\xfa\xed\xfe"):
+        return "macho"
+    if data[:4] == b"%PDF":
+        return "pdf"
+    if data[:2] in (b"PK",):
+        return "zip"
+    if data[:3] == b"\x1f\x8b\x08":
+        return "gzip"
+    # heuristic: if mostly printable ASCII treat as text
+    if data:
+        printable = sum(1 for b in data[:512] if 0x20 <= b < 0x7f or b in (9, 10, 13))
+        if printable / min(len(data), 512) > 0.85:
+            return "text"
+    return "data"
+
+
+def file_hashes(data: bytes) -> dict[str, str]:
+    """Return md5, sha1, sha256 hex-digests of data."""
+    return {
+        "md5": hashlib.md5(data).hexdigest(),
+        "sha1": hashlib.sha1(data).hexdigest(),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -43,19 +102,48 @@ class StringDef:
     """One `$id = ...` declaration, compiled to a regex matcher."""
     ident: str
     raw: str
-    kind: str                     # "text" | "hex" | "regex"
+    kind: str                     # "text" | "hex" | "regex" | "xor"
     regex: re.Pattern[bytes]
     fullword: bool = False
     private: bool = False
+    xor_range: tuple[int, int] | None = None  # (lo, hi) inclusive key range
 
     def find(self, data: bytes) -> list[int]:
         """Return byte offsets of every (non-overlapping start) match."""
+        if self.xor_range is not None:
+            return self._find_xor(data)
         out: list[int] = []
         for m in self.regex.finditer(data):
             if self.fullword and not _is_fullword(data, m.start(), m.end()):
                 continue
             out.append(m.start())
         return out
+
+    def match_lengths(self, data: bytes) -> list[tuple[int, int]]:
+        """Return list of (offset, length) for each match."""
+        if self.xor_range is not None:
+            offs = self._find_xor(data)
+            raw_len = len(self.raw.encode("utf-8"))
+            return [(o, raw_len) for o in offs]
+        out: list[tuple[int, int]] = []
+        for m in self.regex.finditer(data):
+            if self.fullword and not _is_fullword(data, m.start(), m.end()):
+                continue
+            out.append((m.start(), m.end() - m.start()))
+        return out
+
+    def _find_xor(self, data: bytes) -> list[int]:
+        lo, hi = self.xor_range  # type: ignore[misc]
+        plain = self.raw.encode("utf-8") if isinstance(self.raw, str) else self.raw
+        offsets: list[int] = []
+        for key in range(lo, hi + 1):
+            encoded = bytes(b ^ key for b in plain)
+            pat = re.compile(re.escape(encoded), re.DOTALL)
+            for m in pat.finditer(data):
+                if m.start() not in offsets:
+                    offsets.append(m.start())
+        offsets.sort()
+        return offsets
 
 
 def _is_fullword(data: bytes, start: int, end: int) -> bool:
@@ -115,6 +203,16 @@ def _compile_regex(value: str, mods: set[str]) -> tuple[re.Pattern[bytes], str]:
     return re.compile(value.encode("utf-8"), flags), "regex"
 
 
+def _parse_xor_range(mod_str: str) -> tuple[int, int]:
+    """Parse xor or xor(0x01-0xff) into (lo, hi)."""
+    m = re.search(r"xor\s*\(\s*(0x[0-9a-fA-F]+|\d+)\s*-\s*(0x[0-9a-fA-F]+|\d+)\s*\)", mod_str)
+    if m:
+        lo = int(m.group(1), 0)
+        hi = int(m.group(2), 0)
+        return lo, hi
+    return 0x00, 0xff
+
+
 # --------------------------------------------------------------------------- #
 # Rule model                                                                  #
 # --------------------------------------------------------------------------- #
@@ -135,6 +233,7 @@ class Rule:
 class StringMatch:
     ident: str
     offset: int
+    length: int
     preview: str
 
 
@@ -153,7 +252,8 @@ class RuleMatch:
             "severity": self.severity,
             "meta": self.meta,
             "strings": [
-                {"id": s.ident, "offset": s.offset, "preview": s.preview}
+                {"id": s.ident, "offset": s.offset, "length": s.length,
+                 "preview": s.preview}
                 for s in self.matched_strings
             ],
         }
@@ -185,14 +285,15 @@ def _strip_comments(text: str) -> str:
             c = line[i]
             if in_str:
                 cleaned.append(c)
-                if c == quote and line[i - 1] != "\\":
+                if c == quote and (i == 0 or line[i - 1] != "\\"):
                     in_str = False
-            elif c in ('"', "/"):
+            elif c == "/" and i + 1 < len(line) and line[i + 1] == "/":
+                # line comment — stop here
+                break
+            elif c == '"':
                 in_str = True
                 quote = c
                 cleaned.append(c)
-            elif c == "/" and i + 1 < len(line) and line[i + 1] == "/":
-                break
             else:
                 cleaned.append(c)
             i += 1
@@ -231,18 +332,30 @@ def _parse_string_def(ident: str, rhs: str) -> StringDef:
         mods = set(rhs[end + 1:].split())
         regex, kind = _compile_regex(body, mods)
         return StringDef(ident, body, kind, regex, fullword="fullword" in mods)
-    # text string
+    # text string — may have xor modifier
     m = re.match(r'"((?:[^"\\]|\\.)*)"\s*(.*)$', rhs)
     if not m:
         raise ValueError(f"cannot parse string def for {ident}: {rhs!r}")
     value = m.group(1).encode().decode("unicode_escape")
-    mods = set(m.group(2).split())
+    mod_str = m.group(2)
+    mods = set(mod_str.split())
+    # xor modifier
+    if "xor" in mods or re.search(r"xor\s*\(", mod_str):
+        lo, hi = _parse_xor_range(mod_str)
+        # create a dummy regex (won't be used for xor; find() overrides)
+        regex = re.compile(re.escape(value.encode("utf-8")), re.DOTALL)
+        return StringDef(ident, value, "xor", regex,
+                         fullword="fullword" in mods,
+                         xor_range=(lo, hi))
     regex, kind = _compile_text(value, mods)
     return StringDef(ident, value, kind, regex, fullword="fullword" in mods)
 
 
 def parse_rules(text: str) -> list[Rule]:
-    """Parse YARA-subset source into a list of Rule objects."""
+    """Parse YARA-subset source into a list of Rule objects.
+
+    Raises ValueError if no valid rules are found.
+    """
     text = _strip_comments(text)
     rules: list[Rule] = []
     for rm in _RULE_RE.finditer(text):
@@ -274,6 +387,9 @@ def parse_rules(text: str) -> list[Rule]:
 
         condition = " ".join(sections.get("condition", "true").split())
         rules.append(Rule(name, tags, meta, strings, condition or "true"))
+
+    if not rules:
+        raise ValueError("no valid YARA rules found in input")
     return rules
 
 
@@ -283,10 +399,14 @@ def parse_rules(text: str) -> list[Rule]:
 class _Cond:
     """Evaluate a YARA-subset boolean condition against match state."""
 
-    def __init__(self, rule: Rule, hits: dict[str, list[int]], filesize: int):
+    def __init__(self, rule: Rule, hits: dict[str, list[int]],
+                 hit_lengths: dict[str, list[int]],
+                 filesize: int, data: bytes):
         self.rule = rule
         self.hits = hits          # ident -> list[offset]
+        self.hit_lengths = hit_lengths  # ident -> list[length]
         self.filesize = filesize
+        self.data = data
 
     # ---- public ------------------------------------------------------- #
     def eval(self, expr: str) -> bool:
@@ -299,8 +419,12 @@ class _Cond:
     # ---- tokenizer ---------------------------------------------------- #
     _TOK_RE = re.compile(
         r"\(|\)|,|\.\.|>=|<=|==|!=|>|<|"
-        r"\b(?:and|or|not|of|them|all|any|at|in|filesize|true|false)\b|"
-        r"[#$@!]?[\w*]+|\d+(?:KB|MB|GB)?",
+        r"\b(?:and|or|not|of|them|all|any|at|in|filesize|entropy|filetype|"
+        r"uint8|uint16|uint32|true|false)\b|"
+        r"[#$@!][\w*\[\]0-9]*|"
+        r'"[^"]*"|'
+        r"0x[0-9A-Fa-f]+|"
+        r"\d+(?:KB|MB|GB)?",
         re.IGNORECASE,
     )
 
@@ -372,9 +496,33 @@ class _Cond:
             return False
         if low == "filesize":
             return self.filesize
+        if low == "entropy":
+            return shannon_entropy(self.data)
+        if low == "filetype":
+            ft = sniff_filetype(self.data)
+            # next token should be == / != followed by a string literal
+            return ft
+
+        # uint8/uint16/uint32 functions
+        if low in ("uint8", "uint16", "uint32"):
+            off = self._primary()
+            off = int(off) if isinstance(off, (int, float)) else 0
+            if low == "uint8":
+                return self.data[off] if off < len(self.data) else 0
+            elif low == "uint16":
+                if off + 2 <= len(self.data):
+                    return struct.unpack_from("<H", self.data, off)[0]
+                return 0
+            else:  # uint32
+                if off + 4 <= len(self.data):
+                    return struct.unpack_from("<I", self.data, off)[0]
+                return 0
+
+        # string literal (used for filetype == "pe" comparisons)
+        if t.startswith('"') and t.endswith('"'):
+            return t[1:-1]
 
         # set expressions:  <quant> of (...)  /  <quant> of them
-        # (checked before numeric-literal so "2 of them" isn't read as int 2)
         if (low in ("all", "any") or t.isdigit()) and \
                 self._peek() and self._peek().lower() == "of":
             self._next()  # consume 'of'
@@ -382,6 +530,11 @@ class _Cond:
             count = self._count_set(members)
             need = self._quant(low, len(members))
             return count >= need
+
+        # hex literals  0x5A4D
+        m = re.fullmatch(r"0x([0-9A-Fa-f]+)", t, re.IGNORECASE)
+        if m:
+            return int(m.group(1), 16)
 
         # numeric literals incl. KB/MB/GB
         m = re.fullmatch(r"(\d+)(KB|MB|GB)?", t, re.IGNORECASE)
@@ -391,12 +544,25 @@ class _Cond:
             return n * {"": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}[unit]
 
         if low in ("all", "any"):
-            # bare 'all'/'any' rarely used alone; treat as truthy
             return True
 
-        # count reference  #a / #a > 3 handled by caller via _cmp
+        # count reference  #a / #a > 3
         if t.startswith("#"):
             return len(self.hits.get("$" + t[1:], []))
+
+        # match-length reference  !a  -> length of first match of $a
+        if t.startswith("!"):
+            ident = "$" + t[1:]
+            lengths = self.hit_lengths.get(ident, [])
+            return lengths[0] if lengths else 0
+
+        # indexed offset reference  @a[N] (1-based)
+        if t.startswith("@") and "[" in t:
+            base = t[1:t.index("[")]
+            idx_str = t[t.index("[") + 1:t.index("]")]
+            idx = int(idx_str) - 1  # convert 1-based to 0-based
+            offs = self.hits.get("$" + base, [])
+            return offs[idx] if idx < len(offs) else -1
 
         # match reference   $a   (boolean: did it hit?)
         if t.startswith("$"):
@@ -482,14 +648,19 @@ def _preview(data: bytes, off: int, n: int = 24) -> str:
 
 def match_rule(rule: Rule, data: bytes) -> RuleMatch | None:
     hits: dict[str, list[int]] = {}
+    hit_lengths: dict[str, list[int]] = {}
     matched: list[StringMatch] = []
     for ident, sd in rule.strings.items():
-        offs = sd.find(data)
-        if offs:
+        pairs = sd.match_lengths(data)
+        if pairs:
+            offs = [p[0] for p in pairs]
+            lens = [p[1] for p in pairs]
             hits[ident] = offs
-            matched.append(StringMatch(ident, offs[0], _preview(data, offs[0])))
+            hit_lengths[ident] = lens
+            matched.append(StringMatch(ident, offs[0], lens[0],
+                                       _preview(data, offs[0])))
     try:
-        ok = _Cond(rule, hits, len(data)).eval(rule.condition)
+        ok = _Cond(rule, hits, hit_lengths, len(data), data).eval(rule.condition)
     except Exception:
         ok = False
     if not ok:
@@ -508,6 +679,9 @@ class ScanResult:
     target: str
     size: int
     matches: list[RuleMatch] = field(default_factory=list)
+    entropy: float = field(default=0.0)
+    filetype: str = field(default="data")
+    hashes: dict[str, str] = field(default_factory=dict)
 
     @property
     def max_severity(self) -> str:
@@ -529,12 +703,21 @@ class ScanResult:
             "match_count": len(self.matches),
             "max_severity": self.max_severity,
             "counts": self.counts(),
+            "entropy": round(self.entropy, 4),
+            "filetype": self.filetype,
+            "hashes": self.hashes,
             "matches": [m.to_dict() for m in self.matches],
         }
 
 
 def scan(data: bytes, rules: Iterable[Rule], target: str = "<data>") -> ScanResult:
-    res = ScanResult(target=target, size=len(data))
+    res = ScanResult(
+        target=target,
+        size=len(data),
+        entropy=shannon_entropy(data),
+        filetype=sniff_filetype(data),
+        hashes=file_hashes(data),
+    )
     for rule in rules:
         m = match_rule(rule, data)
         if m:
@@ -736,5 +919,24 @@ rule EICAR_Test_File : test {
         $eicar = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR"
     condition:
         $eicar
+}
+
+rule High_Entropy_Blob : packed evasion {
+    meta:
+        severity = "medium"
+        description = "File or region with very high entropy (likely packed/encrypted)"
+    condition:
+        entropy >= 7.5 and filesize > 512
+}
+
+rule XOR_Encoded_MZ : encoded evasion {
+    meta:
+        severity = "high"
+        description = "XOR-obfuscated MZ/PE header stub (single-byte key brute-force)"
+    strings:
+        $xmz  = "MZ" xor(0x01-0xff)
+        $xdos = "This program cannot be run in DOS mode" xor(0x01-0xff)
+    condition:
+        $xmz and $xdos
 }
 """

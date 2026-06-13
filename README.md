@@ -20,6 +20,12 @@ pip install "git+https://github.com/cognis-digital/yararun.git"
 yararun scan .            # → prioritized findings in seconds
 ```
 
+<!-- cognis:layman:start -->
+## What is this?
+
+YARARUN is a file-scanning tool that checks files and folders for suspicious content using simple pattern rules — the same idea as antivirus signature matching, but transparent and scriptable. You write (or use the built-in) rules describing dangerous patterns like encoded PowerShell commands, ransom-note language, or hidden executable headers, and YARARUN tells you which files match and how severe the finding is. It is aimed at security analysts, developers building malware-detection pipelines, and teams who want a lightweight, no-account-required scanner they can run locally, in CI, or from an AI agent via MCP.
+<!-- cognis:layman:end -->
+
 ## Contents
 
 - [Why yararun?](#why) · [Features](#features) · [Quick start](#quick-start) · [Example](#example) · [Architecture](#architecture) · [AI stack](#ai-stack) · [How it compares](#how-it-compares) · [Integrations](#integrations) · [Install anywhere](#install-anywhere) · [Related](#related) · [Contributing](#contributing)
@@ -45,6 +51,42 @@ lightweight hunting
 <div align="right"><a href="#top">↑ back to top</a></div>
 
 <a name="quick-start"></a>
+<!-- cognis:install:start -->
+## Install
+
+`yararun` is source-available (not published to PyPI) — every method below installs
+straight from GitHub. Pick whichever you prefer; the one-line scripts auto-detect
+the best tool available on your machine.
+
+**One-liner (Linux / macOS):**
+```sh
+curl -fsSL https://raw.githubusercontent.com/cognis-digital/yararun/HEAD/install.sh | sh
+```
+
+**One-liner (Windows PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/cognis-digital/yararun/HEAD/install.ps1 | iex
+```
+
+**Or install manually — any one of:**
+```sh
+pipx install "git+https://github.com/cognis-digital/yararun.git"     # isolated (recommended)
+uv tool install "git+https://github.com/cognis-digital/yararun.git"  # uv
+pip install "git+https://github.com/cognis-digital/yararun.git"      # pip
+```
+
+**From source:**
+```sh
+git clone https://github.com/cognis-digital/yararun.git
+cd yararun && pip install .
+```
+
+Then run:
+```sh
+yararun --help
+```
+<!-- cognis:install:end -->
+
 ## Quick start
 
 ```bash

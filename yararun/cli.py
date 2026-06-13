@@ -9,9 +9,12 @@ from . import TOOL_NAME, TOOL_VERSION
 from .core import (
     SEVERITY_ORDER,
     ScanResult,
+    file_hashes,
     load_rules,
     parse_rules,
     scan,
+    shannon_entropy,
+    sniff_filetype,
 )
 
 
@@ -30,6 +33,9 @@ def _read_text(path: str) -> str:
 
 
 def _get_rules(args) -> list:
+    expr = getattr(args, "expr", None)
+    if expr:
+        return parse_rules(expr)
     if getattr(args, "rules", None):
         return parse_rules(_read_text(args.rules))
     return load_rules()
@@ -43,6 +49,9 @@ def _render_scan_table(res: ScanResult) -> str:
     lines.append(f"YARARUN scan: {res.target}")
     lines.append("=" * 60)
     lines.append(f"Size           : {res.size} bytes")
+    lines.append(f"Entropy        : {res.entropy:.4f}")
+    lines.append(f"Filetype       : {res.filetype}")
+    lines.append(f"SHA256         : {res.hashes.get('sha256', 'n/a')}")
     lines.append(f"Matches        : {len(res.matches)}")
     counts = res.counts()
     sev = ", ".join(f"{k}={counts[k]}" for k in SEVERITY_ORDER if counts[k]) or "none"
@@ -74,6 +83,18 @@ def _render_rules_table(rules: list) -> str:
         if desc:
             lines.append(f"           {desc}")
         lines.append(f"           strings={len(r.strings)}  condition: {r.condition}")
+    return "\n".join(lines)
+
+
+def _render_info_table(data: bytes, target: str) -> str:
+    lines = [f"YARARUN info: {target}", "=" * 60]
+    lines.append(f"Size     : {len(data)} bytes")
+    lines.append(f"Filetype : {sniff_filetype(data)}")
+    lines.append(f"Entropy  : {shannon_entropy(data):.4f}")
+    hsh = file_hashes(data)
+    lines.append(f"MD5      : {hsh['md5']}")
+    lines.append(f"SHA1     : {hsh['sha1']}")
+    lines.append(f"SHA256   : {hsh['sha256']}")
     return "\n".join(lines)
 
 
@@ -151,6 +172,28 @@ def _cmd_compile(args) -> int:
     return 0
 
 
+def _cmd_info(args) -> int:
+    try:
+        data = _read_bytes(args.target)
+    except OSError as exc:
+        print(f"error: cannot read {args.target}: {exc}", file=sys.stderr)
+        return 2
+
+    if args.format == "json":
+        hsh = file_hashes(data)
+        payload = {
+            "target": args.target,
+            "size": len(data),
+            "filetype": sniff_filetype(data),
+            "entropy": round(shannon_entropy(data), 4),
+            "hashes": hsh,
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        print(_render_info_table(data, args.target))
+    return 0
+
+
 # --------------------------------------------------------------------------- #
 # Parser                                                                       #
 # --------------------------------------------------------------------------- #
@@ -171,6 +214,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="file path(s) to scan, or '-' for stdin")
     s.add_argument("-r", "--rules",
                    help="custom rule file (default: bundled triage pack)")
+    s.add_argument("-e", "--expr",
+                   help="inline rule text (overrides -r and bundled rules)")
     s.set_defaults(func=_cmd_scan)
 
     r = sub.add_parser("rules", help="list loaded rules")
@@ -181,6 +226,10 @@ def _build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("compile", help="validate/compile a rule file")
     c.add_argument("rules", help="rule file to compile")
     c.set_defaults(func=_cmd_compile)
+
+    i = sub.add_parser("info", help="show file metadata (entropy, filetype, hashes)")
+    i.add_argument("target", help="file path to inspect")
+    i.set_defaults(func=_cmd_info)
 
     return p
 
