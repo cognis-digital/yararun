@@ -34,3 +34,6 @@ yararun = "yararun.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["yararun"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
