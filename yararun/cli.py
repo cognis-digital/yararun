@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 
 from . import TOOL_NAME, TOOL_VERSION
@@ -104,7 +105,7 @@ def _render_info_table(data: bytes, target: str) -> str:
 def _cmd_scan(args) -> int:
     try:
         rules = _get_rules(args)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, re.error) as exc:
         print(f"error: cannot load rules: {exc}", file=sys.stderr)
         return 2
 
@@ -135,7 +136,7 @@ def _cmd_scan(args) -> int:
 def _cmd_rules(args) -> int:
     try:
         rules = _get_rules(args)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, re.error) as exc:
         print(f"error: cannot load rules: {exc}", file=sys.stderr)
         return 2
     if args.format == "json":
@@ -160,7 +161,7 @@ def _cmd_compile(args) -> int:
     try:
         text = _read_text(args.rules)
         rules = parse_rules(text)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, re.error) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     if args.format == "json":

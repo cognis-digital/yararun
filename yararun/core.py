@@ -204,11 +204,18 @@ def _compile_regex(value: str, mods: set[str]) -> tuple[re.Pattern[bytes], str]:
 
 
 def _parse_xor_range(mod_str: str) -> tuple[int, int]:
-    """Parse xor or xor(0x01-0xff) into (lo, hi)."""
+    """Parse xor or xor(0x01-0xff) into (lo, hi).
+
+    Clamps values to the valid byte range [0, 255] and normalises an
+    inverted range (lo > hi) by swapping the endpoints, so the caller
+    always receives a sensible iteration range.
+    """
     m = re.search(r"xor\s*\(\s*(0x[0-9a-fA-F]+|\d+)\s*-\s*(0x[0-9a-fA-F]+|\d+)\s*\)", mod_str)
     if m:
-        lo = int(m.group(1), 0)
-        hi = int(m.group(2), 0)
+        lo = max(0, min(255, int(m.group(1), 0)))
+        hi = max(0, min(255, int(m.group(2), 0)))
+        if lo > hi:
+            lo, hi = hi, lo
         return lo, hi
     return 0x00, 0xff
 
@@ -354,8 +361,13 @@ def _parse_string_def(ident: str, rhs: str) -> StringDef:
 def parse_rules(text: str) -> list[Rule]:
     """Parse YARA-subset source into a list of Rule objects.
 
-    Raises ValueError if no valid rules are found.
+    Raises ValueError if the input is not a string, no valid rules are
+    found, or a string pattern contains an invalid regular expression.
     """
+    if not isinstance(text, str):
+        raise ValueError(
+            f"parse_rules() expects a str, got {type(text).__name__!r}"
+        )
     text = _strip_comments(text)
     rules: list[Rule] = []
     for rm in _RULE_RE.finditer(text):
@@ -383,7 +395,12 @@ def parse_rules(text: str) -> list[Rule]:
             if sid == "$":
                 sid = f"$_anon{anon}"
                 anon += 1
-            strings[sid] = _parse_string_def(sid, sm.group(2))
+            try:
+                strings[sid] = _parse_string_def(sid, sm.group(2))
+            except re.error as exc:
+                raise ValueError(
+                    f"invalid regex in rule '{name}', string {sid}: {exc}"
+                ) from exc
 
         condition = " ".join(sections.get("condition", "true").split())
         rules.append(Rule(name, tags, meta, strings, condition or "true"))
