@@ -9,9 +9,13 @@ from . import TOOL_NAME, TOOL_VERSION
 from .core import (
     SEVERITY_ORDER,
     ScanResult,
+    file_hashes,
     load_rules,
     parse_rules,
     scan,
+    shannon_entropy,
+    sniff_filetype,
+    to_sarif,
 )
 
 
@@ -41,8 +45,13 @@ def _get_rules(args) -> list:
 def _render_scan_table(res: ScanResult) -> str:
     lines: list[str] = []
     lines.append(f"YARARUN scan: {res.target}")
-    lines.append("=" * 60)
+    lines.append("=" * 64)
     lines.append(f"Size           : {res.size} bytes")
+    lines.append(f"File type      : {res.filetype}")
+    lines.append(f"Entropy        : {res.entropy:.4f} bits/byte"
+                 + ("  (HIGH - packed/encrypted)" if res.entropy >= 7.5 else ""))
+    if res.hashes:
+        lines.append(f"SHA256         : {res.hashes.get('sha256', '')}")
     lines.append(f"Matches        : {len(res.matches)}")
     counts = res.counts()
     sev = ", ".join(f"{k}={counts[k]}" for k in SEVERITY_ORDER if counts[k]) or "none"
@@ -59,14 +68,15 @@ def _render_scan_table(res: ScanResult) -> str:
         if desc:
             lines.append(f"           {desc}")
         for s in m.matched_strings[:6]:
-            lines.append(f"             {s.ident} @ 0x{s.offset:x}  {s.preview!r}")
+            lines.append(f"             {s.ident} @ 0x{s.offset:x} "
+                         f"(+{s.length})  {s.preview!r}")
         if len(m.matched_strings) > 6:
             lines.append(f"             ... +{len(m.matched_strings) - 6} more")
     return "\n".join(lines)
 
 
 def _render_rules_table(rules: list) -> str:
-    lines = [f"YARARUN rules ({len(rules)} loaded)", "=" * 60]
+    lines = [f"YARARUN rules ({len(rules)} loaded)", "=" * 64]
     for r in rules:
         tagstr = (" :" + " ".join(r.tags)) if r.tags else ""
         lines.append(f"[{r.severity().upper():8}] {r.name}{tagstr}")
@@ -87,7 +97,6 @@ def _cmd_scan(args) -> int:
         print(f"error: cannot load rules: {exc}", file=sys.stderr)
         return 2
 
-    overall_findings = False
     results: list[ScanResult] = []
     for target in args.targets:
         try:
@@ -95,20 +104,57 @@ def _cmd_scan(args) -> int:
         except OSError as exc:
             print(f"error: cannot read {target}: {exc}", file=sys.stderr)
             return 2
-        res = scan(data, rules, target=target)
-        results.append(res)
-        actionable = [m for m in res.matches if m.severity != "info"]
-        if actionable:
-            overall_findings = True
+        results.append(scan(data, rules, target=target))
 
     if args.format == "json":
         payload = [r.to_dict() for r in results]
         out = json.dumps(payload if len(payload) != 1 else payload[0], indent=2)
         print(out)
+    elif args.format == "sarif":
+        print(json.dumps(to_sarif(results), indent=2))
     else:
         print("\n\n".join(_render_scan_table(r) for r in results))
 
+    # Exit-code gate. By default any non-info match is actionable; --fail-on
+    # raises the bar to a minimum severity (critical>high>medium>low>info).
+    threshold = getattr(args, "fail_on", None) or "low"
+    max_allowed = SEVERITY_ORDER.index(threshold)  # lower index == more severe
+    overall_findings = any(
+        m.severity != "info" and SEVERITY_ORDER.index(m.severity) <= max_allowed
+        for r in results for m in r.matches
+    )
     return 1 if overall_findings else 0
+
+
+def _cmd_info(args) -> int:
+    """File-intelligence (entropy / type / hashes) without rule matching."""
+    reports = []
+    for target in args.targets:
+        try:
+            data = _read_bytes(target)
+        except OSError as exc:
+            print(f"error: cannot read {target}: {exc}", file=sys.stderr)
+            return 2
+        reports.append({
+            "target": target,
+            "size": len(data),
+            "filetype": sniff_filetype(data),
+            "entropy": shannon_entropy(data),
+            "hashes": file_hashes(data),
+        })
+    if args.format == "json":
+        print(json.dumps(reports if len(reports) != 1 else reports[0], indent=2))
+    else:
+        for r in reports:
+            print(f"{r['target']}")
+            print(f"  size    : {r['size']} bytes")
+            print(f"  type    : {r['filetype']}")
+            print(f"  entropy : {r['entropy']:.4f} bits/byte"
+                  + ("  (HIGH)" if r["entropy"] >= 7.5 else ""))
+            print(f"  md5     : {r['hashes']['md5']}")
+            print(f"  sha1    : {r['hashes']['sha1']}")
+            print(f"  sha256  : {r['hashes']['sha256']}")
+    return 0
 
 
 def _cmd_rules(args) -> int:
@@ -162,8 +208,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--version", action="version",
                    version=f"{TOOL_NAME} {TOOL_VERSION}")
-    p.add_argument("--format", choices=("table", "json"), default="table",
-                   help="output format")
+    p.add_argument("--format", choices=("table", "json", "sarif"),
+                   default="table",
+                   help="output format (sarif = SARIF 2.1.0 for code-scanning)")
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("scan", help="scan file(s) against rules")
@@ -171,7 +218,15 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="file path(s) to scan, or '-' for stdin")
     s.add_argument("-r", "--rules",
                    help="custom rule file (default: bundled triage pack)")
+    s.add_argument("--fail-on", dest="fail_on",
+                   choices=("critical", "high", "medium", "low"), default="low",
+                   help="exit non-zero only at/above this severity "
+                        "(default: low = any actionable finding)")
     s.set_defaults(func=_cmd_scan)
+
+    i = sub.add_parser("info", help="file intelligence: entropy, type, hashes")
+    i.add_argument("targets", nargs="+", help="file path(s) or '-' for stdin")
+    i.set_defaults(func=_cmd_info)
 
     r = sub.add_parser("rules", help="list loaded rules")
     r.add_argument("-r", "--rules",

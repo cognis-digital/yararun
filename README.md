@@ -49,7 +49,7 @@ yararun scan .            # → prioritized findings in seconds
 
 ## Contents
 
-- [Why yararun?](#why) · [Features](#features) · [Quick start](#quick-start) · [Example](#example) · [Architecture](#architecture) · [AI stack](#ai-stack) · [How it compares](#how-it-compares) · [Integrations](#integrations) · [Install anywhere](#install-anywhere) · [Related](#related) · [Contributing](#contributing)
+- [Why yararun?](#why) · [Features](#features) · [Quick start](#quick-start) · [Example](#example) · [Demos](#demos) · [Architecture](#architecture) · [AI stack](#ai-stack) · [How it compares](#how-it-compares) · [Integrations](#integrations) · [Install anywhere](#install-anywhere) · [Related](#related) · [Contributing](#contributing)
 
 <a name="why"></a>
 ## Why yararun?
@@ -63,9 +63,11 @@ lightweight hunting
 <a name="features"></a>
 ## Features
 
-- ✅ Parse Rules
-- ✅ Parse Rules File
-- ✅ Scan Path
+- ✅ YARA-subset rule engine — text/hex/regex strings, `nocase`/`wide`/`fullword`/**`xor`** modifiers, `#count`, `!len`, `@offset[i]`, `at`/`in` anchors, `uint8/16/32(...)` integer functions, arithmetic, and `and`/`or`/`not` + `N of (...)` conditions
+- ✅ File-intelligence module — Shannon **entropy**, magic-byte **file-type** sniff, and MD5/SHA1/SHA256 hashes (also usable as the `entropy` / `filetype` condition variables) via `yararun info`
+- ✅ Real bundled triage pack — PE/ELF/Mach-O, UPX, high-entropy blobs, XOR-encoded MZ stubs, PowerShell/JS/VBScript droppers, base64 PE stubs, ransom notes, cryptominers, reverse shells, credential theft, persistence, EICAR
+- ✅ **Table · JSON · SARIF 2.1.0** output + a `--fail-on <severity>` CI gate
+- ✅ Ten worked, verified demos under [`demos/`](demos/) (see below)
 - ✅ Runs on Linux/macOS/Windows · Docker · devcontainer
 - ✅ Ports in Python, JavaScript, Go, and Rust (`ports/`)
 
@@ -77,10 +79,15 @@ lightweight hunting
 ```bash
 pip install cognis-yararun
 yararun --version
-yararun scan .                       # scan current project
-yararun scan . --format json         # machine-readable
-yararun scan . --fail-on high        # CI gate (non-zero exit)
+yararun scan suspicious.bin                  # scan a file against the triage pack
+yararun info suspicious.bin                  # entropy / file-type / hashes only
+yararun scan suspicious.bin --format json    # machine-readable
+yararun scan suspicious.bin --format sarif   # SARIF 2.1.0 for code-scanning
+yararun scan ./artifacts/* --fail-on high    # CI gate (non-zero at/above high)
 ```
+
+> `yararun` reads files and reports matches — it never executes, modifies, or
+> transmits anything. Use it only on artifacts you are authorized to inspect.
 
 <div align="right"><a href="#top">↑ back to top</a></div>
 
@@ -94,6 +101,35 @@ $ yararun scan .
 
   2 findings · risk score 5 · 38ms
 ```
+
+<div align="right"><a href="#top">↑ back to top</a></div>
+
+<a name="demos"></a>
+## Worked demos
+
+Every folder under [`demos/`](demos/) is a self-contained, **verified**
+scenario: a realistic input file in the tool's real input format plus a
+`SCENARIO.md` that explains where the data came from, the exact command to run,
+the expected finding, and how to act on it. All inputs are sanitized — reserved
+example domains/IPs (`.invalid`, RFC 2606/5737), placeholder wallets, and AWS's
+own published example key — so nothing here is a live indicator.
+
+| Demo | Scenario | Fires |
+|---|---|---|
+| [`01-basic`](demos/01-basic) | First hunt over a quarantined folder | custom pack |
+| [`02-clean`](demos/02-clean) | A clean file → zero findings, exit 0 | — |
+| [`02-deep`](demos/02-deep) | Multi-indicator dropper (xor + entropy + uint) | 5 rules, **critical** |
+| [`03-mixed`](demos/03-mixed) | Mixed clean/suspicious tree | varies |
+| [`04-cryptominer`](demos/04-cryptominer) | XMRig coin-miner config on a server | `Cryptominer_Config` |
+| [`05-ransom-note`](demos/05-ransom-note) | Ransom note on a file share | `Ransom_Note` (**critical**) |
+| [`06-reverse-shell`](demos/06-reverse-shell) | Reverse shell in a cron job | `Shell_Reverse_Connect` (**critical**) |
+| [`07-office-macro`](demos/07-office-macro) | Auto-exec VBA downloader | `VBScript_Macro` + PowerShell |
+| [`08-eicar-ci-gate`](demos/08-eicar-ci-gate) | EICAR + `--fail-on` + SARIF in CI | `EICAR_Test_File` |
+| [`09-credential-stealer`](demos/09-credential-stealer) | Infostealer `strings` dump | `Credential_Theft` |
+| [`10-custom-sarif`](demos/10-custom-sarif) | Custom secret-scan ruleset → SARIF | AWS key / api-secret / debug flag |
+
+A couple of demos generate their artifact locally (`build_sample.py`,
+`build_eicar.py`) so on-access antivirus can't strip a committed copy.
 
 <div align="right"><a href="#top">↑ back to top</a></div>
 

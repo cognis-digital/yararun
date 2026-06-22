@@ -1,0 +1,11 @@
+# `strings` output captured from a suspicious binary pulled off an endpoint.
+# These are the file paths an infostealer reads to harvest credentials/wallets.
+# (Strings only — no binary, no live IOC.)
+
+%LOCALAPPDATA%\Google\Chrome\User Data\Default\Login Data
+%APPDATA%\Mozilla\Firefox\Profiles\xxxx.default\key3.db
+%APPDATA%\Mozilla\Firefox\Profiles\xxxx.default\logins.json
+%APPDATA%\Electrum\wallets\default_wallet
+C:\Users\Public\wallet.dat
+SELECT origin_url, username_value, password_value FROM logins
+zip -r c:\users\public\loot.zip .

