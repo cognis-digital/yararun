@@ -5,5 +5,5 @@ edition = "2021"
 license = "LicenseRef-COCL-1.0"
 
 [[bin]]
-name = "yararun"
+name = "yararun-rs"
 path = "src/main.rs"

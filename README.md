@@ -49,7 +49,7 @@ yararun scan .            # → prioritized findings in seconds
 
 ## Contents
 
-- [Why yararun?](#why) · [Features](#features) · [Quick start](#quick-start) · [Example](#example) · [Demos](#demos) · [Architecture](#architecture) · [AI stack](#ai-stack) · [How it compares](#how-it-compares) · [Integrations](#integrations) · [Install anywhere](#install-anywhere) · [Related](#related) · [Contributing](#contributing)
+- [Why yararun?](#why) · [Features](#features) · [Quick start](#quick-start) · [Example](#example) · [Demos](#demos) · [Architecture](#architecture) · [Ports](#ports) · [Edge / air-gap feeds](#feeds) · [Scope & safety](#scope) · [AI stack](#ai-stack) · [How it compares](#how-it-compares) · [Integrations](#integrations) · [Install anywhere](#install-anywhere) · [Related](#related) · [Contributing](#contributing)
 
 <a name="why"></a>
 ## Why yararun?
@@ -68,8 +68,9 @@ lightweight hunting
 - ✅ Real bundled triage pack — PE/ELF/Mach-O, UPX, high-entropy blobs, XOR-encoded MZ stubs, PowerShell/JS/VBScript droppers, base64 PE stubs, ransom notes, cryptominers, reverse shells, credential theft, persistence, EICAR
 - ✅ **Table · JSON · SARIF 2.1.0** output + a `--fail-on <severity>` CI gate
 - ✅ Ten worked, verified demos under [`demos/`](demos/) (see below)
+- ✅ **Edge / air-gap IOC feeds** — a keyless, offline-first threat-intel catalog (OSV, CISA KEV, EPSS, abuse.ch Feodo/ThreatFox/URLhaus, MITRE ATT&CK STIX) via `yararun feeds`, cacheable to disk and sneakernet-able into a disconnected enclave
 - ✅ Runs on Linux/macOS/Windows · Docker · devcontainer
-- ✅ Ports in Python, JavaScript, Go, and Rust (`ports/`)
+- ✅ Ports in Python, JavaScript, Go, Rust, **and POSIX shell** ([`ports/`](ports/)) — each mirrors the `info`/`scan` surface, carries a smoke test, and is built/tested in CI
 
 <div align="right"><a href="#top">↑ back to top</a></div>
 
@@ -94,13 +95,54 @@ yararun scan ./artifacts/* --fail-on high    # CI gate (non-zero at/above high)
 <a name="example"></a>
 ## Example
 
-```text
-$ yararun scan .
-  [HIGH    ] YAR-001  example finding             (./src/app.py)
-  [MEDIUM  ] YAR-002  another signal              (./config.yaml)
+Real output from a multi-indicator dropper sample
+([`demos/02-deep`](demos/02-deep)) — a PowerShell loader hidden in a high-entropy,
+UPX-marked, XOR-obfuscated blob with a hardcoded C2 URL:
 
-  2 findings · risk score 5 · 38ms
+```text
+$ yararun scan demos/02-deep/suspicious_sample.bin
+YARARUN scan: demos/02-deep/suspicious_sample.bin
+================================================================
+Size           : 2424 bytes
+File type      : pe
+Entropy        : 7.8627 bits/byte  (HIGH - packed/encrypted)
+SHA256         : f9913baa5f33aabee4caaad98c0225a1f77f04e1a19eb4ca1762c7389a6040aa
+Matches        : 6
+By severity    : high=2, medium=3, info=1
+Max severity   : HIGH
+
+[HIGH    ] XOR_Encoded_MZ :evasion encoded
+           Single-byte XOR-obfuscated MZ/PE executable stub
+[HIGH    ] Embedded_PowerShell :script dropper
+           Embedded/obfuscated PowerShell loader patterns
+             $a @ 0x5b (+10)  'powershell -nop -w hidde'
+             $b @ 0x75 (+4)   '-enc IEX (New-Object Net'
+[MEDIUM  ] High_Entropy_Blob :packer evasion
+[MEDIUM  ] UPX_Packed :packer evasion
+[MEDIUM  ] Suspicious_URL :network ioc
+[INFO    ] PE_Executable :pe format
 ```
+
+The same scan as machine-readable JSON (truncated):
+
+```jsonc
+$ yararun scan demos/02-deep/suspicious_sample.bin --format json
+{
+  "target": "demos/02-deep/suspicious_sample.bin",
+  "size": 2424,
+  "entropy": 7.8627,
+  "filetype": "pe",
+  "hashes": { "sha256": "f9913baa…40aa", "md5": "…", "sha1": "…" },
+  "match_count": 6,
+  "max_severity": "high",
+  "counts": { "critical": 0, "high": 2, "medium": 3, "low": 0, "info": 1 },
+  "matches": [ { "rule": "XOR_Encoded_MZ", "severity": "high",
+                 "tags": ["evasion", "encoded"], "strings": [ … ] }, … ]
+}
+```
+
+`scan` exits **non-zero** whenever an actionable (non-`info`) match is found, so
+it drops straight into a CI gate (`--fail-on <severity>` raises the bar).
 
 <div align="right"><a href="#top">↑ back to top</a></div>
 
@@ -144,6 +186,30 @@ flowchart LR
 
 <div align="right"><a href="#top">↑ back to top</a></div>
 
+<a name="ports"></a>
+## Polyglot ports
+
+The file-intelligence + triage-scan core is ported across five languages so you
+can drop `yararun` into any stack or ship a single static binary. Every port
+mirrors the reference CLI's two read-only commands and emits the same JSON
+shape; `scan` exits non-zero when a rule fires (CI-gate parity). Each carries a
+smoke test, and all are built/tested on every push by the
+[`ports` CI workflow](.github/workflows/ports.yml).
+
+| Language | Path | Run | Test |
+|---|---|---|---|
+| Python (reference) | [`yararun/`](yararun) | `yararun scan FILE` | `pytest` |
+| JavaScript / Node | [`ports/javascript/`](ports/javascript) | `node ports/javascript/index.js scan FILE` | `node --test` |
+| Go | [`ports/go/`](ports/go) | `cd ports/go && go run . scan FILE` | `go test ./...` |
+| Rust | [`ports/rust/`](ports/rust) | `cd ports/rust && cargo run -- scan FILE` | `cargo test` |
+| POSIX shell | [`ports/shell/`](ports/shell) | `sh ports/shell/yararun.sh scan FILE` | `sh ports/shell/test.sh` |
+
+The ports implement the literal-string subset of the bundled triage pack; the
+Python reference is the full engine (hex/regex/`xor` strings, counts/offsets,
+`uintN()` functions, `N of (...)` conditions, SARIF). See [`ports/README.md`](ports/README.md).
+
+<div align="right"><a href="#top">↑ back to top</a></div>
+
 <a name="ai-stack"></a>
 ## Use it from any AI stack
 
@@ -169,6 +235,64 @@ flowchart LR
 | Open license | ✅ COCL | varies |
 
 *Built in the spirit of **YARA**, re-framed the Cognis way. Missing a credit? Open a PR.*
+
+<div align="right"><a href="#top">↑ back to top</a></div>
+
+<a name="feeds"></a>
+## Edge / air-gap IOC feeds
+
+`yararun` is a passive scanner, but triage often needs to cross-reference what
+you find against current threat intelligence. The bundled **keyless feed
+catalog** ([`yararun/data_feeds_2026.json`](yararun/data_feeds_2026.json), 35
+feeds) wires real, mostly-keyless sources — **OSV.dev**, **CISA KEV**, **FIRST
+EPSS**, abuse.ch **Feodo Tracker / ThreatFox / URLhaus / SSLBL**, **MITRE
+ATT&CK** STIX, **NIST 800-53 OSCAL**, **OFAC SDN** — fetched over HTTPS, cached
+to disk, and **re-served offline** so the tool keeps working on disconnected /
+edge / air-gapped gear.
+
+```bash
+yararun feeds list                       # browse the catalog (offline, no network)
+yararun feeds list --domain threat-intel # filter by domain
+yararun feeds update feodo-c2 threatfox  # the ONLY command that egresses (explicit)
+yararun feeds get feodo-c2 --offline     # serve from cache only — never touches the net
+```
+
+**Air-gap workflow** — refresh on a connected host, sneakernet the cache, import
+on the isolated enclave:
+
+```bash
+# connected host
+yararun feeds update osv cisa-kev feodo-c2 threatfox
+yararun feeds snapshot-export feeds.tar.gz
+# → copy feeds.tar.gz across the gap →
+# air-gapped enclave
+yararun feeds snapshot-import feeds.tar.gz
+yararun feeds get cisa-kev --offline
+```
+
+The cache location is `COGNIS_FEEDS_CACHE` (default `~/.cache/cognis-feeds`).
+Everything except `feeds update`/`get` (without `--offline`) is a pure
+local/catalog read — **no network egress unless you explicitly ask for it**, and
+no API keys are required for the core feeds. Only real, attributable sources are
+catalogued; nothing here is fabricated intel.
+
+<div align="right"><a href="#top">↑ back to top</a></div>
+
+<a name="scope"></a>
+## Scope, authorization & safety
+
+`yararun` is a **defensive, passive, offline** tool:
+
+- It **reads** files/blobs and reports matches. It never executes, modifies,
+  patches, quarantines, or transmits the artifacts you point it at.
+- There is **no active scanning** and no network probing of third-party hosts.
+  The only outbound traffic the tool can make is an *explicit* `yararun feeds
+  update`/`get` to the catalogued, public threat-intel sources — and even that
+  is fully optional and air-gap-bypassable.
+- Use it only on artifacts you are **authorized to inspect**. The bundled rules
+  and all demo inputs use sanitized, reserved example indicators (RFC 2606/5737
+  domains/IPs, placeholder wallets, AWS's own published example key, the EICAR
+  test string) — nothing shipped here is a live indicator.
 
 <div align="right"><a href="#top">↑ back to top</a></div>
 

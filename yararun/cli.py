@@ -197,6 +197,73 @@ def _cmd_compile(args) -> int:
     return 0
 
 
+def _cmd_feeds(args) -> int:
+    """Edge/air-gap threat-intel feed catalog (keyless, offline-capable).
+
+    yararun is a passive, offline scanner. This subcommand never touches the
+    network *unless you explicitly ask it to* with `feeds update`/`get`; `list`
+    and `--offline` are pure cache/catalog reads. The catalog ships with the
+    package so the tool stays fully functional air-gapped.
+    """
+    try:
+        from . import datafeeds
+    except ImportError as exc:  # pragma: no cover
+        print(f"error: datafeeds unavailable: {exc}", file=sys.stderr)
+        return 2
+
+    if args.feeds_cmd == "list":
+        feeds = datafeeds.list_feeds(getattr(args, "domain", None))
+        if args.format == "json":
+            print(json.dumps(feeds, indent=2))
+        else:
+            print(f"YARARUN feed catalog ({len(feeds)} feeds, keyless/offline-capable)")
+            print("=" * 64)
+            for f in feeds:
+                age = datafeeds.cached_age_hours(f["id"])
+                fresh = "uncached" if age is None else f"{age:.1f}h old"
+                print(f"  {f['id']:28} {f.get('domain', ''):13} "
+                      f"[{fresh}]  {f['name']}")
+        return 0
+
+    if args.feeds_cmd == "update":
+        # Network egress — only on explicit `feeds update`.
+        rc = 0
+        for fid in args.ids:
+            try:
+                pth = datafeeds.update(fid)
+                print(f"  updated {fid} -> {pth} ({pth.stat().st_size} bytes)")
+            except (KeyError, ConnectionError) as exc:
+                print(f"  {fid}: {exc}", file=sys.stderr)
+                rc = 1
+        return rc
+
+    if args.feeds_cmd == "get":
+        try:
+            data = datafeeds.get(args.id, offline=args.offline)
+        except (KeyError, FileNotFoundError, ConnectionError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        if isinstance(data, (dict, list)):
+            print(json.dumps(data, indent=2)[:8000])
+        else:
+            print(data[:8000])
+        return 0
+
+    if args.feeds_cmd == "snapshot-export":
+        n = datafeeds.snapshot_export(args.path)
+        print(f"exported {n} feed(s) -> {args.path}")
+        return 0
+
+    if args.feeds_cmd == "snapshot-import":
+        n = datafeeds.snapshot_import(args.path)
+        print(f"imported {n} feed(s) from {args.path}")
+        return 0
+
+    print("error: missing feeds subcommand (list|update|get|snapshot-*)",
+          file=sys.stderr)
+    return 2
+
+
 # --------------------------------------------------------------------------- #
 # Parser                                                                       #
 # --------------------------------------------------------------------------- #
@@ -236,6 +303,32 @@ def _build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("compile", help="validate/compile a rule file")
     c.add_argument("rules", help="rule file to compile")
     c.set_defaults(func=_cmd_compile)
+
+    # ----------------------------------------------------------------- #
+    # feeds: edge/air-gap threat-intel catalog (keyless, offline-first) #
+    # ----------------------------------------------------------------- #
+    f = sub.add_parser(
+        "feeds",
+        help="edge/air-gap threat-intel feed catalog (keyless, offline-capable)",
+    )
+    fsub = f.add_subparsers(dest="feeds_cmd", required=True)
+    fl = fsub.add_parser("list", help="list catalogued feeds (offline)")
+    fl.add_argument("--domain",
+                    help="filter by domain (vuln/threat-intel/compliance/osint)")
+    fu = fsub.add_parser("update",
+                         help="fetch + cache feed(s) — the ONLY network egress")
+    fu.add_argument("ids", nargs="+", help="feed id(s) to refresh")
+    fg = fsub.add_parser("get", help="print a cached/fetched feed")
+    fg.add_argument("id", help="feed id")
+    fg.add_argument("--offline", action="store_true",
+                    help="serve from cache only; never touch the network")
+    fe = fsub.add_parser("snapshot-export",
+                         help="tar the feed cache for air-gap sneakernet")
+    fe.add_argument("path", help="output .tar.gz")
+    fi = fsub.add_parser("snapshot-import",
+                         help="import a feed-cache snapshot (air-gap)")
+    fi.add_argument("path", help="input .tar.gz")
+    f.set_defaults(func=_cmd_feeds)
 
     return p
 

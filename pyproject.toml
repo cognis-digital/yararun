@@ -35,5 +35,8 @@ yararun = "yararun.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["yararun"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"yararun/data_feeds_2026.json" = "yararun/data_feeds_2026.json"
+
 [tool.hatch.metadata]
 allow-direct-references = true
