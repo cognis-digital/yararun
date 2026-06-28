@@ -1,0 +1,22 @@
+$ yararun-emit --help
+
+usage: yararun [-h] [--version] [--format {table,json,sarif}]
+               {scan,info,rules,compile,feeds} ...
+
+YARA-subset rule engine for malware/IOC triage on files you are authorized to
+inspect (defensive use only).
+
+positional arguments:
+  {scan,info,rules,compile,feeds}
+    scan                scan file(s) against rules
+    info                file intelligence: entropy, type, hashes
+    rules               list loaded rules
+    compile             validate/compile a rule file
+    feeds               edge/air-gap threat-intel feed catalog (keyless,
+                        offline-capable)
+
+options:
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit
+  --format {table,json,sarif}
+                        output format (sarif = SARIF 2.1.0 for code-scanning)

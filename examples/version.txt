@@ -1,0 +1,3 @@
+$ yararun-emit --version
+
+yararun 2.0.0

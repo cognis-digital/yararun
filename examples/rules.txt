@@ -1,0 +1,46 @@
+$ yararun-emit rules
+
+YARARUN rules (17 loaded)
+================================================================
+[INFO    ] PE_Executable :pe format
+           Windows PE / DOS MZ executable header
+           strings=2  condition: uint16(0) == 0x5A4D and $pe
+[INFO    ] ELF_Executable :elf format
+           ELF binary (Linux executable / shared object)
+           strings=1  condition: $elf at 0
+[INFO    ] MachO_Executable :macho format
+           Mach-O binary (macOS executable)
+           strings=4  condition: any of them
+[MEDIUM  ] High_Entropy_Blob :packer evasion
+           Very high Shannon entropy: likely packed/encrypted payload
+           strings=0  condition: entropy >= 7.5 and filesize > 1KB
+[MEDIUM  ] UPX_Packed :packer evasion
+           UPX-packed executable (common malware packer)
+           strings=3  condition: 2 of them
+[HIGH    ] XOR_Encoded_MZ :evasion encoded
+           Single-byte XOR-obfuscated MZ/PE executable stub
+           strings=2  condition: $mz and $stub
+[HIGH    ] Embedded_PowerShell :script dropper
+           Embedded/obfuscated PowerShell loader patterns
+           strings=9  condition: $a and 2 of ($b, $c, $d, $e, $f, $g, $h, $i)
+[HIGH    ] JS_Eval_Dropper :script obfuscation
+           JavaScript eval/unescape obfuscation dropper
+           strings=5  condition: $eval and 2 of ($unescape, $fromcc, $atob, $doc)
+[HIGH    ] VBScript_Macro :office macro dropper
+           VBA/VBScript auto-exec macro with shell execution
+           strings=6  condition: any of ($auto1, $auto2, $auto3) and $create and 1 of ($shell, $run)
+[HIGH    ] Base64_PE_Stub :encoded payload
+           Base64-encoded PE header (TVqQ / TVpQ) embedded in text
+           strings=3  condition: any of them
+[MEDIUM  ] Suspicious_URL :network ioc
+           Hardcoded HTTP(S) URL or Tor .onion C2 endpoint
+           strings=3  condition: $onion or $ip or #url > 2
+[CRITICAL] Ransom_Note :ransomware
+           Ransomware ransom-note language and payment demand
+           strings=6  condition: $r1 and 2 of ($r2, $r3, $r4, $r5, $r6)
+[HIGH    ] Cryptominer_Config :miner cryptojacking
+           Crypto-mining pool / stratum configuration strings
+           strings=6  condition: $s1 or 2 of ($s2, $s3, $s4, $s5, $s6)
+[CRITICAL] Shell_Reverse_Connect :backdoor network
+           Reverse shell / netcat / bind-shell command patterns
+           strings=6  condition: ($nc1 or $nc2) or ($bash and $dev
