@@ -35,15 +35,40 @@ Defensive use only: scan files/blobs you are authorized to inspect.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 TOOL_NAME = "yararun"
-TOOL_VERSION = "2.0.0"
+TOOL_VERSION = "2.1.0"
 
 SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"]
+
+
+# --------------------------------------------------------------------------- #
+# Severity helpers                                                            #
+# --------------------------------------------------------------------------- #
+def severity_rank(severity: str) -> int:
+    """Return the ordinal rank of a severity (0 == most severe).
+
+    Unknown/blank severities collapse onto ``medium`` — the same default the
+    :class:`Rule` model uses — so callers can compare freely without guarding.
+    """
+    sev = str(severity).lower()
+    if sev in SEVERITY_ORDER:
+        return SEVERITY_ORDER.index(sev)
+    return SEVERITY_ORDER.index("medium")
+
+
+def severity_at_least(severity: str, threshold: str) -> bool:
+    """True when ``severity`` is at or above ``threshold`` (critical highest).
+
+    ``severity_at_least("high", "medium")`` is ``True``;
+    ``severity_at_least("low", "high")`` is ``False``.
+    """
+    return severity_rank(severity) <= severity_rank(threshold)
 
 
 # --------------------------------------------------------------------------- #
@@ -729,6 +754,25 @@ class ScanResult:
             c[m.severity] = c.get(m.severity, 0) + 1
         return c
 
+    def filtered(self, min_severity: str) -> "ScanResult":
+        """Return a copy keeping only matches at/above ``min_severity``.
+
+        The original result is left untouched (pure/non-mutating). File
+        intelligence (size, entropy, type, hashes) is preserved verbatim; only
+        the match list is narrowed. Useful for suppressing low-signal hits in
+        reports while keeping the full-fidelity scan available upstream.
+        """
+        keep = [m for m in self.matches
+                if severity_at_least(m.severity, min_severity)]
+        return ScanResult(
+            target=self.target,
+            size=self.size,
+            entropy=self.entropy,
+            filetype=self.filetype,
+            hashes=dict(self.hashes),
+            matches=keep,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "target": self.target,
@@ -859,6 +903,81 @@ def to_sarif(results: Iterable["ScanResult"],
             "results": sarif_results,
         }],
     }
+
+
+# --------------------------------------------------------------------------- #
+# NDJSON + CSV exporters (streaming-friendly / spreadsheet-friendly)          #
+# --------------------------------------------------------------------------- #
+def to_ndjson(results: Iterable["ScanResult"]) -> str:
+    """Render results as newline-delimited JSON — one compact object per file.
+
+    Unlike the pretty JSON array emitted by ``--format json``, NDJSON is
+    append-friendly and trivially streamable: each line is an independent,
+    self-contained scan record, so downstream tooling (jq, log shippers, data
+    lakes) can consume the output incrementally without buffering the whole run.
+    """
+    return "\n".join(
+        json.dumps(res.to_dict(), separators=(",", ":"), sort_keys=True)
+        for res in results
+    )
+
+
+# Stable column order for the CSV row-per-match export.
+CSV_COLUMNS = [
+    "target", "filetype", "size", "entropy", "sha256",
+    "rule", "severity", "tags", "description",
+    "string_id", "offset", "length", "preview",
+]
+
+
+def to_csv(results: Iterable["ScanResult"]) -> str:
+    """Render results as CSV with one row per matched string (RFC 4180).
+
+    A file with no matches still contributes a single summary row (its rule /
+    string columns left blank) so every scanned target is represented. The
+    column set is fixed (:data:`CSV_COLUMNS`) for stable downstream parsing.
+    """
+    import csv
+    import io
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=CSV_COLUMNS, lineterminator="\n")
+    writer.writeheader()
+    for res in results:
+        base = {
+            "target": res.target,
+            "filetype": res.filetype,
+            "size": res.size,
+            "entropy": res.entropy,
+            "sha256": res.hashes.get("sha256", ""),
+        }
+        if not res.matches:
+            writer.writerow(base)
+            continue
+        for m in res.matches:
+            desc = str(m.meta.get("description", ""))
+            if m.matched_strings:
+                for s in m.matched_strings:
+                    row = dict(base)
+                    row.update({
+                        "rule": m.rule,
+                        "severity": m.severity,
+                        "tags": " ".join(m.tags),
+                        "description": desc,
+                        "string_id": s.ident,
+                        "offset": s.offset,
+                        "length": s.length,
+                        "preview": s.preview,
+                    })
+                    writer.writerow(row)
+            else:
+                row = dict(base)
+                row.update({
+                    "rule": m.rule, "severity": m.severity,
+                    "tags": " ".join(m.tags), "description": desc,
+                })
+                writer.writerow(row)
+    return buf.getvalue()
 
 
 # --------------------------------------------------------------------------- #

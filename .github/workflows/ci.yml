@@ -2,14 +2,22 @@ name: ci
 on: [push, pull_request]
 permissions:
   contents: read
+
 jobs:
   test:
+    name: test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: Install
         run: |
           python -m pip install --upgrade pip
@@ -22,3 +30,25 @@ jobs:
           else
             echo "no tests present — skipping"
           fi
+
+  lint:
+    name: lint (ruff)
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+      - name: Byte-compile (syntax gate)
+        run: python -m compileall -q yararun
+      - name: Ruff (critical errors)
+        # Fail the build only on real defects: syntax errors, undefined names,
+        # broken f-strings, and duplicate/invalid comparisons. Style nits are
+        # reported but non-blocking, so the gate stays meaningful and stable.
+        run: ruff check --select E9,F63,F7,F82 yararun tests
+      - name: Ruff (full report, non-blocking)
+        run: ruff check yararun tests || true

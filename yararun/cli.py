@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 from . import TOOL_NAME, TOOL_VERSION
@@ -13,10 +14,14 @@ from .core import (
     load_rules,
     parse_rules,
     scan,
+    severity_at_least,
     shannon_entropy,
     sniff_filetype,
+    to_csv,
+    to_ndjson,
     to_sarif,
 )
+from .scanfs import WalkStats, iter_targets
 
 
 def _read_bytes(path: str) -> bytes:
@@ -97,19 +102,56 @@ def _cmd_scan(args) -> int:
         print(f"error: cannot load rules: {exc}", file=sys.stderr)
         return 2
 
-    results: list[ScanResult] = []
+    # Pre-validate top-level targets so a plain typo still fails loudly with the
+    # historical exit code 2, even though directories now expand into files.
     for target in args.targets:
+        if target == "-":
+            continue
+        if not os.path.exists(target):
+            print(f"error: cannot read {target}: No such file or directory",
+                  file=sys.stderr)
+            return 2
+
+    # Expand any directories in the target list into concrete files, honouring
+    # recursion, include/exclude globs and the per-file size ceiling. Plain file
+    # targets and '-' (stdin) pass straight through, preserving old behaviour.
+    walk = WalkStats()
+    targets = list(iter_targets(
+        args.targets,
+        recursive=getattr(args, "recursive", True),
+        include=getattr(args, "include", None),
+        exclude=getattr(args, "exclude", None),
+        max_bytes=getattr(args, "max_bytes", 0) or 0,
+        follow_symlinks=getattr(args, "follow_symlinks", False),
+        stats=walk,
+    ))
+
+    results: list[ScanResult] = []
+    for target in targets:
         try:
             data = _read_bytes(target)
         except OSError as exc:
-            print(f"error: cannot read {target}: {exc}", file=sys.stderr)
-            return 2
-        results.append(scan(data, rules, target=target))
+            print(f"warning: skipping {target}: {exc}", file=sys.stderr)
+            continue
+        res = scan(data, rules, target=target)
+        min_sev = getattr(args, "min_severity", None)
+        if min_sev:
+            res = res.filtered(min_sev)
+        results.append(res)
+
+    if getattr(args, "stats", False):
+        print(f"scanned {walk.files_yielded} file(s); dirs={walk.dirs_visited} "
+              f"skipped(size={walk.skipped_size}, excluded={walk.skipped_excluded}, "
+              f"unreadable={walk.skipped_unreadable})", file=sys.stderr)
 
     if args.format == "json":
         payload = [r.to_dict() for r in results]
         out = json.dumps(payload if len(payload) != 1 else payload[0], indent=2)
         print(out)
+    elif args.format == "ndjson":
+        print(to_ndjson(results))
+    elif args.format == "csv":
+        print(to_csv(results), end="")
     elif args.format == "sarif":
         print(json.dumps(to_sarif(results), indent=2))
     else:
@@ -275,20 +317,43 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--version", action="version",
                    version=f"{TOOL_NAME} {TOOL_VERSION}")
-    p.add_argument("--format", choices=("table", "json", "sarif"),
+    p.add_argument("--format", choices=("table", "json", "sarif", "ndjson", "csv"),
                    default="table",
-                   help="output format (sarif = SARIF 2.1.0 for code-scanning)")
+                   help="output format: table (default), json, sarif "
+                        "(SARIF 2.1.0 for code-scanning), ndjson "
+                        "(one JSON object per file), or csv (one row per match)")
     sub = p.add_subparsers(dest="command", required=True)
 
-    s = sub.add_parser("scan", help="scan file(s) against rules")
+    s = sub.add_parser("scan", help="scan file(s) or director(y/ies) against rules")
     s.add_argument("targets", nargs="+",
-                   help="file path(s) to scan, or '-' for stdin")
+                   help="file/directory path(s) to scan, or '-' for stdin")
     s.add_argument("-r", "--rules",
                    help="custom rule file (default: bundled triage pack)")
     s.add_argument("--fail-on", dest="fail_on",
                    choices=("critical", "high", "medium", "low"), default="low",
                    help="exit non-zero only at/above this severity "
                         "(default: low = any actionable finding)")
+    s.add_argument("--min-severity", dest="min_severity",
+                   choices=("critical", "high", "medium", "low", "info"),
+                   default=None,
+                   help="suppress matches below this severity in the output")
+    s.add_argument("-R", "--recursive", dest="recursive", action="store_true",
+                   default=True,
+                   help="recurse into sub-directories (default: on)")
+    s.add_argument("--no-recursive", dest="recursive", action="store_false",
+                   help="scan only the top level of any directory target")
+    s.add_argument("--include", action="append", metavar="GLOB",
+                   help="only scan files matching this glob (repeatable)")
+    s.add_argument("--exclude", action="append", metavar="GLOB",
+                   help="skip files matching this glob (repeatable, wins over --include)")
+    s.add_argument("--max-bytes", dest="max_bytes", type=int, default=0,
+                   metavar="N",
+                   help="skip files larger than N bytes when walking (0 = no limit)")
+    s.add_argument("--follow-symlinks", dest="follow_symlinks",
+                   action="store_true",
+                   help="follow symlinked directories while walking")
+    s.add_argument("--stats", action="store_true",
+                   help="print a walk summary (files/dirs/skips) to stderr")
     s.set_defaults(func=_cmd_scan)
 
     i = sub.add_parser("info", help="file intelligence: entropy, type, hashes")
