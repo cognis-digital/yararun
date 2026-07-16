@@ -19,6 +19,7 @@ from .core import (
     TOOL_NAME,
     TOOL_VERSION,
     SEVERITY_ORDER,
+    CSV_COLUMNS,
     DEFAULT_RULES,
     Rule,
     StringDef,
@@ -32,13 +33,19 @@ from .core import (
     shannon_entropy,
     sniff_filetype,
     file_hashes,
+    severity_rank,
+    severity_at_least,
     to_sarif,
+    to_ndjson,
+    to_csv,
 )
+from .scanfs import WalkStats, iter_targets
 
 __all__ = [
     "TOOL_NAME",
     "TOOL_VERSION",
     "SEVERITY_ORDER",
+    "CSV_COLUMNS",
     "DEFAULT_RULES",
     "Rule",
     "StringDef",
@@ -52,5 +59,11 @@ __all__ = [
     "shannon_entropy",
     "sniff_filetype",
     "file_hashes",
+    "severity_rank",
+    "severity_at_least",
     "to_sarif",
+    "to_ndjson",
+    "to_csv",
+    "WalkStats",
+    "iter_targets",
 ]
