@@ -1,0 +1,53 @@
+[2026-08-02 10:16:54] === enhance · yararun · words=120000 loc>=10000 langs=9 push=True ===
+[2026-08-02 10:17:02] phase DOCS — longform 120000-word corpus -> docs/corpus/
+[2026-08-02 13:39:52] === enhance · yararun · words=120000 loc>=10000 langs=9 push=True ===
+[2026-08-02 13:39:57] phase DOCS — longform 120000-word corpus -> docs/corpus/
+[2026-08-02 23:57:37] === enhance · yararun · words=120000 loc>=10000 langs=9 push=True ===
+[2026-08-02 23:57:50] phase DOCS — longform 120000-word corpus -> docs/corpus/
+[2026-08-04 21:34:47] === enhance · yararun · words=120000 loc>=10000 langs=9 push=True ===
+[2026-08-04 21:34:53] phase DOCS — longform 120000-word corpus -> docs/corpus/
+[2026-08-07 05:20:54] phase POLYGLOT — expanding to >= 10000 LOC across 9 languages
+[2026-08-07 05:51:15]   ask(plan/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 05:52:17]   facets: ['scan_directory', 'apply_rule', 'match_strings', 'extract_files', 'log_results', 'rule_compiler']
+[2026-08-07 06:22:39]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 06:30:39]   +polyglot/python/scan_directory.py  (loc now ~4007)
+[2026-08-07 07:01:01]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 07:10:04]   +polyglot/go/scan_directory.go  (loc now ~4082)
+[2026-08-07 07:40:27]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 07:46:10]   +polyglot/rust/scan_directory.rs  (loc now ~4128)
+[2026-08-07 08:16:32]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 08:26:01]   +polyglot/typescript/scan_directory.ts  (loc now ~4220)
+[2026-08-07 08:56:21]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 09:01:57]   +polyglot/c/scan_directory.c  (loc now ~4271)
+[2026-08-07 09:32:19]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 10:13:07]   ask(code/uncensored) error: slot on :8774 unreachable after 4 tries: timed out
+[2026-08-07 10:43:28]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 10:57:54]   +polyglot/java/scan_directory.java  (loc now ~4311)
+[2026-08-07 11:28:16]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 12:09:04]   ask(code/uncensored) error: slot on :8774 unreachable after 4 tries: timed out
+[2026-08-07 12:39:27]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 13:20:05]   ask(code/uncensored) error: slot on :8774 unreachable after 4 tries: timed out
+[2026-08-07 13:50:27]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 14:31:03]   ask(code/uncensored) error: slot on :8774 unreachable after 4 tries: timed out
+[2026-08-07 15:01:26]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 15:19:31]   +polyglot/go/apply_rule.go  (loc now ~4427)
+[2026-08-07 15:49:52]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 15:53:33]   +polyglot/rust/apply_rule.rs  (loc now ~4490)
+[2026-08-07 16:23:54]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 16:43:07]   +polyglot/typescript/apply_rule.ts  (loc now ~4632)
+[2026-08-07 17:00:37]   +polyglot/c/apply_rule.c  (loc now ~4893)
+[2026-08-07 17:30:56]   ask(code/omnicoder) error: Ollama unreachable at http://127.0.0.1:11434 after 3 tries: timed out — falling back to fleet
+[2026-08-07 17:33:58]   +polyglot/cpp/apply_rule.cpp  (loc now ~4966)
+[2026-08-07 17:41:57]   +polyglot/java/apply_rule.java  (loc now ~5289)
+[2026-08-07 18:11:37]   +polyglot/ruby/apply_rule.rb  (loc now ~5469)
+[2026-08-07 18:20:58]   +polyglot/csharp/apply_rule.cs  (loc now ~5923)
+[2026-08-07 18:30:29]   +polyglot/python/match_strings.py  (loc now ~6418)
+[2026-08-07 18:39:49]   +polyglot/go/match_strings.go  (loc now ~6933)
+[2026-08-07 18:49:12]   +polyglot/rust/match_strings.rs  (loc now ~7435)
+[2026-08-07 18:58:36]   +polyglot/typescript/match_strings.ts  (loc now ~8001)
+[2026-08-07 19:05:37]   +polyglot/c/match_strings.c  (loc now ~8334)
+[2026-08-07 19:14:22]   +polyglot/cpp/match_strings.cpp  (loc now ~8721)
+[2026-08-07 19:22:46]   +polyglot/java/match_strings.java  (loc now ~9171)
+[2026-08-07 19:27:11]   +polyglot/ruby/match_strings.rb  (loc now ~9446)
+[2026-08-07 19:34:41]   +polyglot/csharp/match_strings.cs  (loc now ~9876)
+[2026-08-07 19:40:42]   +polyglot/python/extract_files.py  (loc now ~10204)
