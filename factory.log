@@ -51,3 +51,8 @@
 [2026-08-07 19:27:11]   +polyglot/ruby/match_strings.rb  (loc now ~9446)
 [2026-08-07 19:34:41]   +polyglot/csharp/match_strings.cs  (loc now ~9876)
 [2026-08-07 19:40:42]   +polyglot/python/extract_files.py  (loc now ~10204)
+[2026-08-07 19:40:46] === done · yararun · loc=10204 · {'committed': True, 'pushed': True, 'push_err': ''} ===
+[2026-09-11 14:30:59] === enhance · yararun · words=120000 loc>=10000 langs=9 push=True ===
+[2026-09-11 14:31:03] phase DOCS — longform 120000-word corpus -> docs/corpus/
+[2026-09-11 22:55:48] phase POLYGLOT — expanding to >= 10000 LOC across 9 languages
+[2026-09-11 22:56:01]   facets: ['rule_parser', 'file_walker', 'string_extractor', 'pattern_engine', 'result_aggregator', 'config_handler']
